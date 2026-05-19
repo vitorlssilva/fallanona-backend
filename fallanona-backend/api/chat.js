@@ -3,12 +3,13 @@ import { GoogleGenAI } from "@google/genai";
 // Inicializa o cliente do Gemini usando a variável de ambiente configurada na Vercel
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+// Configura o runtime para Edge (resposta ultra rápida e barata na Vercel)
 export const config = {
   runtime: 'edge',
 };
 
 export default async function handler(req) {
-  // Garante suporte a requisições do tipo POST
+  // Garante que a API só responda a requisições do tipo POST
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Método não permitido' }), { status: 405 });
   }
@@ -16,7 +17,7 @@ export default async function handler(req) {
   try {
     const { message, history } = await req.json();
 
-    // Engenharia de prompt avançada injetando a identidade da Fallanona
+    // Contexto institucional e regras de comportamento do robô
     const systemInstruction = `
 Você é o assistente virtual inteligente da Fallanona Viagens & Turismo (CNPJ: 56.009.976/0001-80).
 Sua missão é atender os clientes com excelência, seguindo a filosofia de "Propósito > Ruído": foque no que importa, seja prestativo, profissional e use emojis de forma natural para manter a conversa leve.
@@ -40,7 +41,7 @@ FLUXO DE QUALIFICAÇÃO DE VENDAS (Siga estas etapas de forma flexível baseando
 Mantenha as respostas curtas, scannáveis (use quebras de linha) e evite textos gigantescos.
 `;
 
-    // Formata o histórico recebido para o padrão que o Gemini espera
+    // Formata o histórico recebido do front-end para o padrão estruturado do Gemini
     const formattedMessages = [];
     if (history && Array.isArray(history)) {
       history.forEach(msg => {
@@ -51,13 +52,13 @@ Mantenha as respostas curtas, scannáveis (use quebras de linha) e evite textos 
       });
     }
 
-    // Adiciona a mensagem atual do usuário ao fluxo
+    // Adiciona a última mensagem enviada pelo usuário ao final do array
     formattedMessages.push({
       role: 'user',
       parts: [{ text: message }]
     });
 
-    // Chama o modelo Gemini 1.5 Flash para processar com a nova instrução de sistema
+    // Executa a chamada ao modelo Gemini 1.5 Flash
     const response = await ai.models.generateContent({
       model: 'gemini-1.5-flash',
       contents: formattedMessages,
@@ -67,9 +68,8 @@ Mantenha as respostas curtas, scannáveis (use quebras de linha) e evite textos 
       }
     });
 
-    const replyText = response.text;
-
-    return new Response(JSON.stringify({ reply: replyText }), {
+    // Retorna a resposta do robô para o cliente
+    return new Response(JSON.stringify({ reply: response.text }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });

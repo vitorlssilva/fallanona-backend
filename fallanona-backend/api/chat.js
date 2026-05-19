@@ -1,60 +1,81 @@
-const { GoogleGenAI } = require("@google/genai");
+import { GoogleGenAI } from "@google/genai";
 
-// Inicializa a API do Gemini puxando a chave das configurações seguras da Vercel
+// Inicializa o cliente do Gemini usando a variável de ambiente configurada na Vercel
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-module.exports = async (req, res) => {
-  // Configuração de CORS para permitir que o seu arquivo HTML local converse com o servidor
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+export const config = {
+  runtime: 'edge',
+};
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
+export default async function handler(req) {
+  // Garante suporte a requisições do tipo POST
   if (req.method !== 'POST') {
-    return res.status(451).json({ erro: "Método não permitido" });
+    return new Response(JSON.stringify({ error: 'Método não permitido' }), { status: 405 });
   }
 
   try {
-    const { mensagem, historico } = req.body;
+    const { message, history } = await req.json();
 
-    // BASE DE CONHECIMENTO DA AGÊNCIA
-    const instrucoesSistema = `
-      Você é a Falla, assistente virtual inteligente da Fallanona Viagens & Turismo.
-      O consultor humano responsável se chama Vitor Sampaio.
-      
-      Regras de Negócio e FAQ da Agência:
-      - Horário de atendimento: Segunda a sexta das 8h às 22h, sábados e domingos das 8h às 12h.
-      - Negociação de Preço/Orçamentos: Nós buscamos as melhores tarifas com nossos consolidadores oficiais parceiros para garantir o menor preço seguro. Se o cliente tiver uma proposta em mãos, peça para ele enviar para o Vitor avaliar se consegue cobrir ou melhorar o suporte. Não trabalhamos com tarifas de buscadores genéricos (Booking, Decolar, etc) por falta de suporte em imprevistos.
-      - Serviços: Emitimos passagens aéreas, pacotes completos, hotéis/pousadas/resorts, seguro viagem, chip de internet internacional, aluguel de carros, cruzeiros marítimos e transfers.
-      - Formas de pagamento: Cartão de crédito parcelado, PIX e boleto bancário.
-      - Dados Oficiais: CNPJ da empresa é 56.009.976/0001-80. Instagram: @fallanonaturismo. Site: fallanonaturismo.com.
-      
-      Diretriz de comportamento: Seja sempre extremamente simpática, use emojis de viagem e responda de forma curta e objetiva baseando-se apenas nessas informações. No final da resposta, mantenha o contexto do que o cliente estava respondendo sobre a viagem para não quebrar o fluxo.
-    `;
+    // Engenharia de prompt avançada injetando a identidade da Fallanona
+    const systemInstruction = `
+Você é o assistente virtual inteligente da Fallanona Viagens & Turismo (CNPJ: 56.009.976/0001-80).
+Sua missão é atender os clientes com excelência, seguindo a filosofia de "Propósito > Ruído": foque no que importa, seja prestativo, profissional e use emojis de forma natural para manter a conversa leve.
 
-    // Formata o histórico do chat para o formato do Gemini
-    const contents = [
-      { role: 'user', parts: [{ text: instrucoesSistema }] },
-      ...historico.map(msg => ({
-        role: msg.type === 'usr' ? 'user' : 'model',
-        parts: [{ text: msg.text }]
-      })),
-      { role: 'user', parts: [{ text: mensagem }] }
-    ];
+DIRETRIZES DE IDENTIDADE INSTITUCIONAL (Responda com segurança e clareza se for perguntado):
+1. Quem é Vítor? O Vítor Sampaio é o nosso consultor e gestor de operações especialista. Ele possui quase duas décadas de experiência em infraestrutura, redes e atendimento de alto padrão, cuidando pessoalmente da curadoria e dos detalhes de cada roteiro.
+2. Nome da empresa: Fallanona Viagens & Turismo.
+3. Tempo de mercado / Confiabilidade: Embora sejamos uma agência com posicionamento moderno e lançada recentemente, operamos com os maiores e mais conhecidos parceiros e consolidadores do turismo global, garantindo total segurança e suporte do planejamento até o retorno.
 
-    // Chama o modelo rápido e gratuito
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: contents,
+REGRA DE OURO DO FLUXO ("RESPONDE E PUXA"):
+Você tem total liberdade para responder a qualquer dúvida direta do cliente (sobre quem é o Vítor, CNPJ, segurança, etc.). No entanto, você NUNCA deve deixar a conversa morrer ou entrar em looping. Toda resposta sua a uma dúvida institucional deve terminar obrigatoriamente engajando o cliente de volta no ponto em que o fluxo de vendas parou.
+
+FLUXO DE QUALIFICAÇÃO DE VENDAS (Siga estas etapas de forma flexível baseando-se no histórico):
+1. DESTINO: Descubra para onde o cliente quer ir (cidade, país ou região). Se o cliente disser apenas um local pequeno ou ambíguo, valide de forma inteligente (ex: "Boa escolha! Já anotei Espanha.").
+2. PERFIL: Entenda quem vai viajar (Sozinho, Casal/A dois, Família, Corporativo).
+3. PERÍODO: Pergunte a data pretendida ou o mês (ex: "Julho/Férias", "Fim do ano", "Próximos 3 meses").
+4. PASSAGEIROS: Quantidade de adultos e se há crianças.
+5. ORÇAMENTO: Faixa estimada por pessoa (até R$3k, entre R$3k e R$6k, R$6k a R$12k, acima de R$12k). Se o cliente disser que não sabe ou prefere aguardar seu orçamento, valide que o Vítor monta propostas personalizadas sem custo e sem compromisso, mas peça para ele escolher uma faixa aproximada apenas para direcionar a pesquisa.
+6. CONTATO: Nome completo, E-mail e WhatsApp para envio da proposta personalizada.
+
+Mantenha as respostas curtas, scannáveis (use quebras de linha) e evite textos gigantescos.
+`;
+
+    // Formata o histórico recebido para o padrão que o Gemini espera
+    const formattedMessages = [];
+    if (history && Array.isArray(history)) {
+      history.forEach(msg => {
+        formattedMessages.push({
+          role: msg.role === 'bot' ? 'model' : 'user',
+          parts: [{ text: msg.text }]
+        });
+      });
+    }
+
+    // Adiciona a mensagem atual do usuário ao fluxo
+    formattedMessages.push({
+      role: 'user',
+      parts: [{ text: message }]
     });
 
-    return res.status(200).json({ resposta: response.text });
+    // Chama o modelo Gemini 1.5 Flash para processar com a nova instrução de sistema
+    const response = await ai.models.generateContent({
+      model: 'gemini-1.5-flash',
+      contents: formattedMessages,
+      config: {
+        systemInstruction: systemInstruction,
+        temperature: 0.7,
+      }
+    });
+
+    const replyText = response.text;
+
+    return new Response(JSON.stringify({ reply: replyText }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
 
   } catch (error) {
-    console.error("Erro interno:", error);
-    return res.status(500).json({ resposta: "Desculpe, tive um probleminha para acessar minha base de dados agora. 😅" });
+    console.error("Erro interno no servidor da API:", error);
+    return new Response(JSON.stringify({ error: 'Erro interno ao processar a requisição' }), { status: 500 });
   }
-};
+}
